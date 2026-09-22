@@ -1,20 +1,26 @@
 # =============================================================================
-# Voice PE firmware add-on: shout to talk
+# Voice PE firmware add-on: shout to talk, with an adaptive threshold
 #
-# Adds a sound level meter on the same microphone channel the wake word uses
-# (passive: it never opens the mic itself, it reads the stream the wake-word
-# engine already keeps running). When the peak level crosses the threshold
-# while the device is idle, the device starts listening exactly as if the
-# wake word had been said: no chime, no prompt. Whatever is said next goes
-# through the normal Assist pipeline, which the intercom automation broadcasts
-# verbatim to the other devices.
+# A sound level meter reads the same microphone channel the wake word uses
+# (passive: it never opens the mic itself). When a peak crosses the effective
+# threshold while the device is idle, the device starts listening exactly as if
+# the wake word had been said: no chime, no prompt. Whatever is said next goes
+# through the normal Assist pipeline, which the intercom automation broadcasts.
 #
-# Entities added to Home Assistant per device:
-#   - "Intercom shout threshold" (dB slider, 0 = loudest the mic can measure,
-#     so values are negative; normal speech measured around -55, a shout
-#     around -45, silence -84, so -45 is the starting point)
-#   - "Intercom sound level" (diagnostic: loudest peak in the last second)
-#   - "Shout to talk" switch to turn the feature off without reflashing
+# Effective threshold = max(slider, ambient speech level + margin)
+#   - slider:  "Intercom shout threshold", the floor you set (dB, 0 = loudest
+#     the mic can measure; typical: silence -84, talking peaks -52, shouts
+#     -45 to -32)
+#   - ambient: the second-loudest second of the last ten, so one shout does not
+#     count but sustained conversation (a call nearby) does. Seconds while the
+#     device is listening or has just been triggered are excluded, so shouts
+#     and the reply never raise it. It decays 3 dB per minute when quiet.
+#   - margin:  "Intercom adaptive margin", how far above the conversation a
+#     shout must be (default 4 dB)
+#
+# Entities per device: Shout to talk (switch), Intercom shout threshold and
+# Intercom adaptive margin (sliders), Intercom sound level, Intercom ambient
+# level and Intercom effective threshold (sensors).
 # =============================================================================
 
 globals:
@@ -23,6 +29,22 @@ globals:
     restore_value: false
     initial_value: "true"
   - id: intercom_peak_hold
+    type: float
+    restore_value: false
+    initial_value: "-100"
+  - id: intercom_skip_second
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: intercom_ring
+    type: float[10]
+    restore_value: false
+    initial_value: "{-100, -100, -100, -100, -100, -100, -100, -100, -100, -100}"
+  - id: intercom_ring_idx
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: intercom_ambient
     type: float
     restore_value: false
     initial_value: "-100"
@@ -50,6 +72,19 @@ number:
     step: 0.5
     unit_of_measurement: dB
     mode: slider
+  - platform: template
+    name: "Intercom adaptive margin"
+    id: intercom_adaptive_margin
+    icon: mdi:arrow-expand-vertical
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 4
+    min_value: 0
+    max_value: 20
+    step: 0.5
+    unit_of_measurement: dB
+    mode: slider
 
 sensor:
   - platform: sound_level
@@ -71,7 +106,10 @@ sensor:
               and:
                 - switch.is_on: intercom_shout_enabled
                 - lambda: return id(intercom_shout_armed);
-                - lambda: return x >= id(intercom_shout_threshold).state;
+                - lambda: |-
+                    float effective = std::max(id(intercom_shout_threshold).state,
+                                               id(intercom_ambient) + id(intercom_adaptive_margin).state);
+                    return x >= effective;
                 - switch.is_off: master_mute_switch
                 - switch.is_off: timer_ringing
                 - not:
@@ -83,6 +121,7 @@ sensor:
             then:
               - script.execute: intercom_shout_listen
 
+  # Once a second: report the loudest peak, feed the ambient tracker.
   - platform: template
     name: "Intercom sound level"
     id: intercom_sound_level_report
@@ -96,13 +135,54 @@ sensor:
     lambda: |-
       float v = id(intercom_peak_hold);
       id(intercom_peak_hold) = -100;
+      // Seconds while listening/replying or just triggered do not count as ambient.
+      bool skip = id(intercom_skip_second) || id(va).is_running()
+                  || id(external_media_player).state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+      id(intercom_skip_second) = false;
+      id(intercom_ring)[id(intercom_ring_idx)] = skip ? -100.0f : v;
+      id(intercom_ring_idx) = (id(intercom_ring_idx) + 1) % 10;
+      // second-loudest of the last ten seconds
+      float first = -100.0f, second = -100.0f;
+      for (int i = 0; i < 10; i++) {
+        float s = id(intercom_ring)[i];
+        if (s > first) { second = first; first = s; }
+        else if (s > second) { second = s; }
+      }
+      float decayed = id(intercom_ambient) - 0.05f;   // 3 dB per minute
+      id(intercom_ambient) = std::max(std::max(second, decayed), -100.0f);
       return v;
+  - platform: template
+    name: "Intercom ambient level"
+    id: intercom_ambient_report
+    icon: mdi:account-voice
+    entity_category: diagnostic
+    unit_of_measurement: dB
+    device_class: sound_pressure
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: return id(intercom_ambient);
+  - platform: template
+    name: "Intercom effective threshold"
+    id: intercom_effective_report
+    icon: mdi:bullhorn-outline
+    entity_category: diagnostic
+    unit_of_measurement: dB
+    device_class: sound_pressure
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      return std::max(id(intercom_shout_threshold).state,
+                      id(intercom_ambient) + id(intercom_adaptive_margin).state);
 
 script:
   - id: intercom_shout_listen
     mode: single
     then:
-      - lambda: id(intercom_shout_armed) = false;
+      - lambda: |-
+          id(intercom_shout_armed) = false;
+          id(intercom_skip_second) = true;
       - voice_assistant.start:
       # Re-arm once the conversation has finished, plus a short guard so the
       # device's own playback cannot retrigger it.

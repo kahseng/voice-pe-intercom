@@ -138,6 +138,19 @@ shout "hey" a few times, and set the slider about 6 dB above the talking
 peaks. Typical values: silence -84, talking peaks -52, shouts -45 to -32.
 Closer to 0 is harder to trigger.
 
+### Adaptive threshold
+
+The slider is a floor. The device also tracks an **ambient speech level**: the
+second-loudest second of the last ten, so a single shout does not count but a
+conversation or a conference call nearby does. Seconds while the device is
+listening or replying are excluded, so the intercom never raises its own bar.
+The effective threshold is the higher of the slider and the ambient level plus
+the **adaptive margin** (default 4 dB), and the ambient level decays 3 dB per
+minute once the room is quiet. During a call the bar rises to a few dB above
+the talking, a real shout still gets through, and a few minutes after the
+call ends everything is back to the slider. Both the ambient level and the
+effective threshold are sensors, shown on the dashboard.
+
 ## Echo guard
 
 When two devices hear the same shout, or one device's playback is loud enough

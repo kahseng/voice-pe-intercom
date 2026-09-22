@@ -32,7 +32,9 @@ TUNING_NOTES = (
     "4. Set the slider about **6 dB above** normal talking. Closer to 0 is *harder* to trigger, "
     "closer to -100 is *easier*.\n\n"
     "The meter shows the loudest moment of each second. Typical values: quiet room -84, normal "
-    "talking peaks -52, shouts -45 to -32. False triggers → slider toward 0. Missed shouts → slider toward -100."
+    "talking peaks -52, shouts -45 to -32. False triggers → slider toward 0. Missed shouts → slider toward -100.\n\n"
+    "The slider is a floor. During sustained conversation nearby the device raises its *effective threshold* "
+    "to the ambient speech level plus the *adaptive margin*, and lets it decay 3 dB per minute once it is quiet."
 )
 
 
@@ -43,7 +45,10 @@ def device_section(d: dict) -> dict:
         {"type": "entities", "state_color": True, "entities": [
             {"entity": f"assist_satellite.home_assistant_voice_{sfx}_assist_satellite", "name": "State"},
             {"entity": f"switch.{pre}_shout_to_talk", "name": "Shout to talk"},
-            {"entity": f"number.{pre}_intercom_shout_threshold", "name": "Shout threshold"},
+            {"entity": f"number.{pre}_intercom_shout_threshold", "name": "Shout threshold (floor)"},
+            {"entity": f"number.{pre}_intercom_adaptive_margin", "name": "Adaptive margin"},
+            {"entity": f"sensor.{pre}_intercom_effective_threshold", "name": "Effective threshold"},
+            {"entity": f"sensor.{pre}_intercom_ambient_level", "name": "Ambient speech level"},
             {"entity": f"sensor.{pre}_intercom_sound_level", "name": "Sound level now"},
             {"entity": f"select.home_assistant_voice_{sfx}_wake_word", "name": "Wake word"},
             {"entity": f"switch.home_assistant_voice_{sfx}_mute", "name": "Microphone mute"}]}]}
@@ -62,7 +67,8 @@ def render_dashboard(devices: list[dict]) -> dict:
     sections.append({"type": "grid", "column_span": n, "cards": [
         {"type": "heading", "heading": "Sound level, last 30 minutes (dB, 0 = loudest)", "icon": "mdi:waveform"},
         {"type": "history-graph", "hours_to_show": 0.5, "refresh_interval": 5, "grid_options": {"columns": "full"},
-         "entities": [{"entity": f"sensor.{d['entity_prefix']}_intercom_sound_level", "name": d["title"]} for d in devices]}]})
+         "entities": [{"entity": f"sensor.{d['entity_prefix']}_intercom_sound_level", "name": d["title"]} for d in devices]
+                     + [{"entity": f"sensor.{d['entity_prefix']}_intercom_effective_threshold", "name": f"{d['title']} threshold"} for d in devices]}]})
     sections.append({"type": "grid", "column_span": 2, "cards": [
         {"type": "heading", "heading": "Transcripts, last 2 days", "icon": "mdi:text-box-outline"},
         {"type": "logbook", "hours_to_show": 48, "grid_options": {"columns": "full"},
