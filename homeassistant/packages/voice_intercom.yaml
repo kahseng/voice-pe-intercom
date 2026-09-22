@@ -1,0 +1,140 @@
+# =============================================================================
+# Voice PE Volume Triggered Intercom - Home Assistant side
+#
+# Install with the API (recommended, everything stays editable in the UI):
+#     python tools/push_config.py --dashboard
+# or as a package: copy to /config/packages/voice_intercom.yaml and add
+#     homeassistant:
+#       packages: !include_dir_named packages
+# to configuration.yaml. Do one or the other, not both.
+#
+# Behaviour: anything said to a device after the wake word, a single press of
+# the centre button, or a shout (custom firmware) is announced word for word on
+# every other Assist satellite. No chime, no confirmation, nothing is parsed.
+# Every transcript is written to the logbook; echoes are dropped (see below).
+# =============================================================================
+
+input_text:
+  intercom_last_sender:
+    name: Intercom last sender
+    icon: mdi:account-voice
+    max: 255
+  intercom_last_message:
+    name: Intercom last message
+    icon: mdi:message-text
+    max: 255
+
+input_boolean:
+  intercom_transcripts:
+    name: Intercom transcripts
+    icon: mdi:text-box-outline
+
+script:
+  intercom_broadcast:
+    alias: "Intercom: broadcast"
+    icon: mdi:bullhorn
+    description: >-
+      Announce a message on Assist satellites. With no targets it goes to every
+      available satellite except the source.
+    mode: parallel
+    max: 10
+    fields:
+      message:
+        name: Message
+        required: true
+        selector:
+          text:
+      source:
+        name: Source satellite
+        description: assist_satellite entity that sent the message; skipped as a target.
+        required: false
+        selector:
+          entity:
+            domain: assist_satellite
+      targets:
+        name: Targets
+        description: Optional. Leave empty for every satellite except the source.
+        required: false
+        selector:
+          entity:
+            domain: assist_satellite
+            multiple: true
+    sequence:
+      - variables:
+          source_id: "{{ source | default('', true) }}"
+          explicit_targets: >-
+            {% set t = targets | default([], true) %}
+            {{ [t] if t is string else t }}
+          all_satellites: >-
+            {{ states.assist_satellite
+               | rejectattr('state', 'in', ['unavailable', 'unknown'])
+               | map(attribute='entity_id') | list }}
+          target_list: >-
+            {% set base = explicit_targets if explicit_targets | count > 0 else all_satellites %}
+            {{ base | reject('eq', source_id) | list }}
+      - condition: template
+        value_template: "{{ target_list | count > 0 }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.intercom_last_sender
+        data:
+          value: "{{ source_id }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.intercom_last_message
+        data:
+          value: "{{ message[:255] }}"
+      - action: assist_satellite.announce
+        continue_on_error: true
+        target:
+          entity_id: "{{ target_list }}"
+        data:
+          message: "{{ message | trim }}"
+          preannounce: false
+
+automation:
+  - id: voice_intercom_broadcast_by_voice
+    alias: "Intercom: broadcast by voice"
+    description: >-
+      Anything said after the wake word or a single button press is announced
+      verbatim on every other satellite. The wildcard-only sentence matches
+      everything, so this pipeline's wake word is intercom-only.
+    mode: parallel
+    triggers:
+      - trigger: conversation
+        command:
+          - "{message}"
+    actions:
+      # Empty response first, so even a dropped echo stays silent.
+      - set_conversation_response: ""
+      - variables:
+          # Echo: the same text as the last broadcast, within 20 s, from a
+          # different device. Happens when a shout starts both devices listening
+          # in the same room, or when one device's playback triggers the other.
+          echo: >-
+            {% set clean = '[^a-z0-9 ]' %}
+            {% set msg = trigger.slots.message | lower | regex_replace(clean, '') | trim %}
+            {% set last = states('input_text.intercom_last_message') | lower | regex_replace(clean, '') | trim %}
+            {% set age = (now() - states.input_text.intercom_last_message.last_changed).total_seconds() %}
+            {% set same_sender = (trigger.satellite_id or '') == states('input_text.intercom_last_sender') %}
+            {{ msg == last and age < 20 and not same_sender }}
+          # Logged against a helper that never changes state, so the dashboard's
+          # logbook card shows only transcripts.
+          sat: input_boolean.intercom_transcripts
+          source_name: "{{ area_name(trigger.satellite_id) if trigger.satellite_id else 'test' }}"
+      # Every transcript goes to the logbook (shown on the Intercom dashboard).
+      - action: logbook.log
+        data:
+          name: "{{ source_name }}"
+          entity_id: "{{ sat }}"
+          message: "heard \"{{ trigger.slots.message }}\"{{ ' (echo, not sent)' if echo else '' }}"
+      - condition: template
+        alias: Drop an echo
+        value_template: "{{ not echo }}"
+      - action: script.turn_on
+        target:
+          entity_id: script.intercom_broadcast
+        data:
+          variables:
+            message: "{{ trigger.slots.message }}"
+            source: "{{ trigger.satellite_id or '' }}"

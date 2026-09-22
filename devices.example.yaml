@@ -1,0 +1,16 @@
+# Copy to devices.yaml (git-ignored) and describe your Voice PE devices.
+#   title:         label on the dashboard
+#   suffix:        last six hex digits of the device's MAC address; it is the
+#                  tail of its entity ids, e.g. assist_satellite.home_assistant_voice_<suffix>_assist_satellite
+#   entity_prefix: how Home Assistant names the shout entities on this device,
+#                  normally "<area>_<device name>" lower-cased with underscores,
+#                  e.g. switch.<entity_prefix>_shout_to_talk
+devices:
+  - title: Living room
+    icon: mdi:sofa
+    suffix: aaaaaa
+    entity_prefix: living_room_home_assistant_voice_aaaaaa
+  - title: Kitchen
+    icon: mdi:silverware-fork-knife
+    suffix: bbbbbb
+    entity_prefix: kitchen_home_assistant_voice_bbbbbb

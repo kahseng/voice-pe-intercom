@@ -1,0 +1,17 @@
+# ESPHome build output and downloads
+.esphome/
+esphome/devices/.esphome/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv*/
+# Local secrets and scratch
+secrets.yaml
+*.log
+*.wav
+.DS_Store
+
+# Per-installation files (keep them in a private repo)
+devices.yaml
+env.sh

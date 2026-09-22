@@ -1,0 +1,113 @@
+# =============================================================================
+# Voice PE firmware add-on: shout to talk
+#
+# Adds a sound level meter on the same microphone channel the wake word uses
+# (passive: it never opens the mic itself, it reads the stream the wake-word
+# engine already keeps running). When the peak level crosses the threshold
+# while the device is idle, the device starts listening exactly as if the
+# wake word had been said: no chime, no prompt. Whatever is said next goes
+# through the normal Assist pipeline, which the intercom automation broadcasts
+# verbatim to the other devices.
+#
+# Entities added to Home Assistant per device:
+#   - "Intercom shout threshold" (dB slider, 0 = loudest the mic can measure,
+#     so values are negative; normal speech measured around -55, a shout
+#     around -45, silence -84, so -45 is the starting point)
+#   - "Intercom sound level" (diagnostic: loudest peak in the last second)
+#   - "Shout to talk" switch to turn the feature off without reflashing
+# =============================================================================
+
+globals:
+  - id: intercom_shout_armed
+    type: bool
+    restore_value: false
+    initial_value: "true"
+  - id: intercom_peak_hold
+    type: float
+    restore_value: false
+    initial_value: "-100"
+
+switch:
+  - platform: template
+    name: "Shout to talk"
+    id: intercom_shout_enabled
+    icon: mdi:bullhorn
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+number:
+  - platform: template
+    name: "Intercom shout threshold"
+    id: intercom_shout_threshold
+    icon: mdi:bullhorn
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: -45
+    min_value: -100
+    max_value: 0
+    step: 0.5
+    unit_of_measurement: dB
+    mode: slider
+
+sensor:
+  - platform: sound_level
+    id: intercom_sound_level
+    passive: true
+    measurement_duration: 100ms
+    microphone:
+      microphone: i2s_mics   # Voice PE's XMOS-processed microphone stream
+      channels: 1            # same channel micro_wake_word listens to
+      gain_factor: 1
+    peak:
+      id: intercom_peak
+      internal: true
+      on_value:
+        - lambda: |-
+            if (x > id(intercom_peak_hold)) id(intercom_peak_hold) = x;
+        - if:
+            condition:
+              and:
+                - switch.is_on: intercom_shout_enabled
+                - lambda: return id(intercom_shout_armed);
+                - lambda: return x >= id(intercom_shout_threshold).state;
+                - switch.is_off: master_mute_switch
+                - switch.is_off: timer_ringing
+                - not:
+                    voice_assistant.is_running:
+                - not:
+                    media_player.is_announcing: external_media_player
+                - not:
+                    media_player.is_playing: external_media_player
+            then:
+              - script.execute: intercom_shout_listen
+
+  - platform: template
+    name: "Intercom sound level"
+    id: intercom_sound_level_report
+    icon: mdi:waveform
+    entity_category: diagnostic
+    unit_of_measurement: dB
+    device_class: sound_pressure
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 1s
+    lambda: |-
+      float v = id(intercom_peak_hold);
+      id(intercom_peak_hold) = -100;
+      return v;
+
+script:
+  - id: intercom_shout_listen
+    mode: single
+    then:
+      - lambda: id(intercom_shout_armed) = false;
+      - voice_assistant.start:
+      # Re-arm once the conversation has finished, plus a short guard so the
+      # device's own playback cannot retrigger it.
+      - wait_until:
+          not:
+            voice_assistant.is_running:
+      - delay: 3s
+      - lambda: id(intercom_shout_armed) = true;

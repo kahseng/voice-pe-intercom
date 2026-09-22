@@ -1,0 +1,15 @@
+# Whisper add-on options (Settings > Add-ons > Whisper > Configuration).
+# model: auto + stt_library: sherpa selects NVIDIA Parakeet for English: 0.3 s per phrase on an ARM VM.
+addon: core_whisper
+version: 3.5.3
+options:
+  model: auto
+  language: en
+  beam_size: 0
+  custom_model_type: faster-whisper
+  stt_library: sherpa
+  whisper_task: transcribe
+  sherpa_streaming: false
+  vad_clip: false
+  local_files_only: false
+  debug_logging: false

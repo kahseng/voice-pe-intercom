@@ -1,0 +1,28 @@
+# One Voice PE. Copy this file per device and replace xxxxxx (three places)
+# with the last six hex digits of the device's MAC address, which is the
+# suffix of its Home Assistant entity ids.
+#
+# Built from the official factory firmware release as a package, plus the
+# "Alexa" wake word and the shout-to-talk add-on. No api key and no wifi block
+# on purpose: the device keeps the key Home Assistant stored in its flash and
+# the Wi-Fi it was provisioned with, so it comes back paired after the update.
+#
+# Keep the release tag in step with your ESPHome version: the release's
+# min_version must be satisfied (26.9.0 needs ESPHome 2026.6.0 or newer).
+substitutions:
+  name: home-assistant-voice-xxxxxx
+  friendly_name: Home Assistant Voice xxxxxx
+
+packages:
+  voice_pe: github://esphome/home-assistant-voice-pe/home-assistant-voice.factory.yaml@26.9.0
+  intercom: !include ../voice-pe-intercom-shout.yaml
+
+esphome:
+  name: ${name}
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
+
+micro_wake_word:
+  models:
+    - model: alexa
+      id: alexa
