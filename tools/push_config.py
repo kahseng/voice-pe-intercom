@@ -50,7 +50,11 @@ LAST_MESSAGE = (
     "{% set msg = states('input_text.intercom_last_message') %}"
     "{% if msg not in ['', 'unknown', 'unavailable'] %}"
     "{% set who = states('input_text.intercom_last_from') %}"
-    "**{{ who if who not in ['', 'unknown', 'unavailable'] else 'Intercom' }}**, "
+    "{% set sat = states('input_text.intercom_last_sender') %}"
+    "{% if who in ['', 'unknown', 'unavailable'] %}"
+    "{% set who = (area_name(sat) or state_attr(sat, 'friendly_name')) if sat.startswith('assist_satellite.') else '' %}"
+    "{% endif %}"
+    "**{{ who or 'Intercom' }}**, "
     "{{ relative_time(states.input_text.intercom_last_message.last_changed) }} ago\n\n> {{ msg }}"
     "{% else %}No messages yet.{% endif %}"
 )
