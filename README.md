@@ -88,6 +88,14 @@ Measured on an ARM virtual machine with a short phrase:
 Confirm the Wyoming discovery in Settings > Devices & services; the entity
 is `stt.faster_whisper` whichever engine the add-on runs.
 
+### LED ring brightness
+
+The ring's listening and replying animations use the brightness stored on
+the device's **LED Ring** light entity (floor 20%), and that light is normally
+off, so the value is easy to miss. To dim the animations, turn the LED Ring
+light on at the brightness you want, then turn it off again; the value
+persists across reboots. Dimmer than 20% needs a firmware change.
+
 ### 3. Pipelines and per-device voice
 
 Create a pipeline per voice as in `homeassistant/pipelines.yaml`: the add-on's
