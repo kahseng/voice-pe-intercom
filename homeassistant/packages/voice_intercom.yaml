@@ -41,6 +41,14 @@ input_text:
     name: Intercom admins
     icon: mdi:shield-account
     max: 255
+  intercom_blocked_words:
+    # Comma-separated words replaced by **** in transcripts, pushes and the
+    # last-message card (and said as "bleep"). Case-insensitive, whole words;
+    # a trailing * also matches endings, e.g. "fuck*" covers "fucking".
+    # push_config.py fills in a default list the first time.
+    name: Intercom blocked words
+    icon: mdi:comment-remove
+    max: 255
   intercom_compose:
     # The text box on the Intercom dashboard; "Send" announces and clears it.
     name: Intercom message
@@ -117,7 +125,13 @@ script:
             domain: assist_satellite
             multiple: true
     sequence:
+      - action: script.intercom_censor
+        data:
+          text: "{{ message }}"
+        response_variable: censored
       - variables:
+          message: "{{ censored.text }}"
+          spoken: "{{ censored.spoken }}"
           source_id: "{{ source | default('', true) }}"
           explicit_targets: >-
             {% set t = targets | default([], true) %}
@@ -207,8 +221,39 @@ script:
             target:
               entity_id: "{{ target_list }}"
             data:
-              message: "{{ message | trim }}"
+              message: "{{ spoken | trim }}"
               preannounce: false
+
+  intercom_censor:
+    alias: "Intercom: censor text"
+    icon: mdi:comment-remove
+    description: >-
+      Returns {text, spoken}: the text with every word in
+      input_text.intercom_blocked_words replaced by ****, and the same with
+      "bleep" for text-to-speech.
+    mode: parallel
+    max: 20
+    fields:
+      text:
+        name: Text
+        required: true
+        selector:
+          text:
+    sequence:
+      - variables:
+          result: >-
+            {% set words = states('input_text.intercom_blocked_words').lower().split(',') | map('trim')
+                           | reject('in', ['', 'unknown', 'unavailable']) | list %}
+            {% set ns = namespace(parts=[]) %}
+            {% for w in words %}
+              {% set stem = w | regex_replace('[^a-z]', '') %}
+              {% if stem %}{% set ns.parts = ns.parts + [stem ~ ('[a-z]*' if w.endswith('*') else '')] %}{% endif %}
+            {% endfor %}
+            {% set clean = (text | string | regex_replace('\\b(' ~ ns.parts | join('|') ~ ')\\b', '****', ignorecase=True))
+                           if ns.parts else text | string %}
+            {{ {'text': clean, 'spoken': clean | replace('****', 'bleep')} }}
+      - stop: Censored
+        response_variable: result
 
   intercom_send_typed:
     alias: "Intercom: send typed message"
@@ -241,17 +286,21 @@ script:
                | join(',') if person else '' }}
       - condition: template
         value_template: "{{ text not in ['', 'unknown', 'unavailable'] }}"
+      - action: script.intercom_censor
+        data:
+          text: "{{ text }}"
+        response_variable: censored
       - action: logbook.log
         data:
           name: "{{ sender }}"
           entity_id: input_boolean.intercom_transcripts
-          message: "typed \"{{ text }}\""
+          message: "typed \"{{ censored.text }}\""
       - action: script.turn_on
         target:
           entity_id: script.intercom_broadcast
         data:
           variables:
-            message: "{{ text }}"
+            message: "{{ censored.text }}"
             sender: "{{ sender }}"
             exclude_phone: "{{ own_phones }}"
       - action: input_text.set_value
@@ -274,13 +323,17 @@ automation:
     actions:
       # Empty response first, so even a dropped echo stays silent.
       - set_conversation_response: ""
+      - action: script.intercom_censor
+        data:
+          text: "{{ trigger.slots.message }}"
+        response_variable: censored
       - variables:
           # Echo: the same text as the last broadcast, within 20 s, from a
           # different device. Happens when a shout starts both devices listening
           # in the same room, or when one device's playback triggers the other.
           echo: >-
             {% set clean = '[^a-z0-9 ]' %}
-            {% set msg = trigger.slots.message | lower | regex_replace(clean, '') | trim %}
+            {% set msg = censored.text | lower | regex_replace(clean, '') | trim %}
             {% set last = states('input_text.intercom_last_message') | lower | regex_replace(clean, '') | trim %}
             {% set age = (now() - states.input_text.intercom_last_message.last_changed).total_seconds() %}
             {% set same_sender = (trigger.satellite_id or '') == states('input_text.intercom_last_sender') %}
@@ -299,7 +352,7 @@ automation:
         data:
           name: "{{ source_name }}"
           entity_id: input_boolean.intercom_transcripts
-          message: "heard \"{{ trigger.slots.message }}\"{{ ' (echo, not sent)' if echo else '' }}"
+          message: "heard \"{{ censored.text }}\"{{ ' (echo, not sent)' if echo else '' }}"
       - condition: template
         alias: Drop an echo
         value_template: "{{ not echo }}"
@@ -308,7 +361,7 @@ automation:
           entity_id: script.intercom_broadcast
         data:
           variables:
-            message: "{{ trigger.slots.message }}"
+            message: "{{ censored.text }}"
             source: "{{ trigger.satellite_id or '' }}"
             sender: "{{ source_name }}"
             exclude_phone: "{{ from_phone }}"
@@ -374,17 +427,21 @@ automation:
               - condition: template
                 value_template: "{{ (trigger.event.data.get('reply_text') or '') | trim | length > 0 }}"
             sequence:
+              - action: script.intercom_censor
+                data:
+                  text: "{{ trigger.event.data.reply_text | trim }}"
+                response_variable: censored
               - action: logbook.log
                 data:
                   name: "{{ phone_name }}"
                   entity_id: input_boolean.intercom_transcripts
-                  message: "typed \"{{ trigger.event.data.reply_text | trim }}\""
+                  message: "typed \"{{ censored.text }}\""
               - action: script.turn_on
                 target:
                   entity_id: script.intercom_broadcast
                 data:
                   variables:
-                    message: "{{ trigger.event.data.reply_text | trim }}"
+                    message: "{{ censored.text }}"
                     sender: "{{ phone_name }}"
                     exclude_phone: "{{ phone }}"
           - conditions:

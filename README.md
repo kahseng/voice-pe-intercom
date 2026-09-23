@@ -186,6 +186,20 @@ the talking, a real shout still gets through, and a few minutes after the
 call ends everything is back to the slider. Both the ambient level and the
 effective threshold are sensors, shown on the dashboard.
 
+## Blocked words
+
+Every message passes through `script.intercom_censor`, whether it was spoken,
+typed on the dashboard or sent with a notification's Reply. Words in
+`input_text.intercom_blocked_words` become `****` in the transcripts, the
+pushes and the last-message card, and the speakers say "bleep" instead.
+Matching is case-insensitive and whole-word, so "assist" and "Dickens" pass;
+a trailing `*` also matches endings ("fuck*" covers "fucking"). The push tool
+fills in a default list the first time; edit it on the Intercom settings
+page. The speech engine has no filter of its own and turns loud, unclear
+sounds into whatever it thinks it heard, so this also hides mishearings.
+Raw speech-to-text output is still visible to administrators in the Assist
+pipeline debug view and in automation traces.
+
 ## Echo guard
 
 When two devices hear the same shout, or one device's playback is loud enough

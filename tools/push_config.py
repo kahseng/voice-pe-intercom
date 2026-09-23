@@ -10,6 +10,7 @@
     editable in the UI afterwards)
   - sets input_text.intercom_phones from "phones" in devices.yaml ("all", the
     default, or a list)
+  - fills input_text.intercom_blocked_words with a default list if it is empty
   - records the Home Assistant administrators in input_text.intercom_admins
     (only their phones get the Mute button, and only they can mute)
   - with --dashboard, renders and saves two dashboards for the devices in
@@ -32,6 +33,13 @@ from ha import rest, run, ws
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "homeassistant" / "packages" / "voice_intercom.yaml"
+# Filled into input_text.intercom_blocked_words the first time only; edit it in
+# the UI afterwards (Intercom settings). A trailing * also matches endings.
+DEFAULT_BLOCKED_WORDS = (
+    "fuck*, motherfuck*, shit*, bullshit*, bitch*, asshole*, ass, arse, bastard*, cunt*, dick, dicks, dickhead*, cock, "
+    "cocks, penis*, piss*, crap*, damn*, goddamn*, whore*, slut*, twat*, wank*, prick*, bollock*"
+)
+
 FAMILY_PATH = "voice-intercom"            # everyone: send a message, see the last one
 SETTINGS_PATH = "voice-intercom-settings"  # administrators only: everything else
 
@@ -103,6 +111,7 @@ def render_settings(devices: list[dict]) -> dict:
             {"entity": "input_boolean.intercom_push_to_phones", "name": "Push to phones"},
             {"entity": "input_text.intercom_phones", "name": "Phones"},
             {"entity": "input_text.intercom_admins", "name": "Administrators (user ids)"},
+            {"entity": "input_text.intercom_blocked_words", "name": "Blocked words (shown as ****)"},
             {"entity": "timer.intercom_shout_mute", "name": "Shouts muted from a phone"},
             {"entity": "automation.intercom_broadcast_by_voice", "name": "Intercom automation"},
             {"entity": "automation.intercom_phone_notification_actions", "name": "Phone buttons automation"},
@@ -213,6 +222,12 @@ async def main() -> None:
         status, _ = await rest("POST", "/api/services/input_text/set_value",
                                {"entity_id": "input_text.intercom_phones", "value": value})
         print(f"phones: {value or '(none)'} ({status})")
+
+    words = (await rest("GET", "/api/states/input_text.intercom_blocked_words"))[1]
+    if isinstance(words, dict) and words.get("state") in ("", "unknown", None):
+        status, _ = await rest("POST", "/api/services/input_text/set_value",
+                               {"entity_id": "input_text.intercom_blocked_words", "value": DEFAULT_BLOCKED_WORDS})
+        print(f"blocked words: default list set ({status})")
 
     users = (await ws([{"type": "config/auth/list"}]))[0]["result"]
     admins = [u["id"] for u in users if not u.get("system_generated") and u.get("is_active")
