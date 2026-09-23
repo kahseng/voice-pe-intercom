@@ -42,7 +42,8 @@ mic audio streamed to HA             speech-to-text (Parakeet)            text-t
 | `homeassistant/pipelines.yaml` | The Assist pipelines (one per voice), as reference. |
 | `homeassistant/addons/whisper.yaml` | Whisper add-on options that select the Parakeet engine. |
 | `esphome/voice-pe-intercom-shout.yaml` | Firmware add-on: shout-to-talk (sound level meter, threshold slider, switch). |
-| `esphome/devices/home-assistant-voice-example.yaml` | Template device config: official firmware + "Alexa" wake word + the add-on. |
+| `esphome/devices/home-assistant-voice-example.yaml` | Template device config: official firmware + "Alexa" wake word + the add-on, optionally silent buttons. |
+| `esphome/sounds/silence.flac` | Silent clip used to mute the button sounds. |
 | `esphome/build.sh` | Compile and flash a device config. |
 | `devices.example.yaml` | Describes your devices for the dashboard renderer. Copy to `devices.yaml`. |
 | `tools/` | Python helpers: push the config and dashboard, watch the intercom live, benchmark speech-to-text. |
@@ -128,7 +129,14 @@ uv venv ~/esphome-venv && uv pip install -p ~/esphome-venv/bin/python esphome
 PATH=~/esphome-venv/bin:$PATH esphome/build.sh path/to/home-assistant-voice-xxxxxx.yaml <device-ip>
 ```
 
-After flashing, pick "Alexa" in the device's wake word selector. The three
+After flashing, pick "Alexa" in the device's wake word selector.
+
+The firmware plays its own sound on every centre-button action (single,
+double, triple and long press); the **Wake sound** switch only covers the
+wake word. To silence them, uncomment the block in the example device file:
+it points those sounds at `esphome/sounds/silence.flac`, a 50 ms silent clip
+in the same format as the originals (48 kHz mono FLAC). The factory-reset
+warnings are left alone. The three
 new entities (switch, threshold slider, sound level) are named after the
 device's Home Assistant name; put that prefix in `devices.yaml` and re-run the
 dashboard push.

@@ -12,6 +12,15 @@
 substitutions:
   name: home-assistant-voice-xxxxxx
   friendly_name: Home Assistant Voice xxxxxx
+  # Optional: silence every centre-button sound (single, double, triple and
+  # long press, and the easter egg). The factory-reset warnings are kept.
+  # Paths are relative to this file.
+  # center_button_press_sound_file: ../sounds/silence.flac
+  # center_button_double_press_sound_file: ../sounds/silence.flac
+  # center_button_triple_press_sound_file: ../sounds/silence.flac
+  # center_button_long_press_sound_file: ../sounds/silence.flac
+  # easter_egg_tick_sound_file: ../sounds/silence.flac
+  # easter_egg_tada_sound_file: ../sounds/silence.flac
 
 packages:
   voice_pe: github://esphome/home-assistant-voice-pe/home-assistant-voice.factory.yaml@26.9.0
