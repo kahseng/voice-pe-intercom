@@ -115,7 +115,18 @@ async def main() -> None:
                 cmds.append(cmd)
                 names.append(f"{domain}.{object_id}")
     for name, r in zip(names, await ws(cmds) if cmds else []):
-        print(f"helper {name}:", "created" if r["success"] else r.get("error"))
+        if not r["success"]:
+            print(f"helper {name}:", r.get("error"))
+            continue
+        # Home Assistant derives the entity id from the display name; give it
+        # the id the package, scripts and dashboard refer to.
+        domain = name.split(".")[0]
+        got = f"{domain}.{r['result']['id']}"
+        if got != name:
+            rr = (await ws([{"type": "config/entity_registry/update", "entity_id": got, "new_entity_id": name}]))[0]
+            print(f"helper {name}: created as {got}, renamed" if rr["success"] else f"helper {name}: rename failed {rr.get('error')}")
+        else:
+            print(f"helper {name}: created")
     if not cmds:
         print("helpers: already present")
     if "input_boolean.intercom_push_to_phones" in names:
