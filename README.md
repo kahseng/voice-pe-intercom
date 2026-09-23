@@ -10,6 +10,10 @@ repeats your words in its own voice:
 2. Say the wake word, then speak.
 3. Press the centre button once, then speak.
 
+Every message is also pushed to your phones through the Home Assistant
+Companion app, with a Reply button that announces what you type on every
+device.
+
 ```
 device A                             Home Assistant                       device B
 shout / wake word / button   -->     Assist pipeline "Intercom"           assist_satellite.announce
@@ -23,11 +27,12 @@ mic audio streamed to HA             speech-to-text (Parakeet)            text-t
   device, transcription and speech synthesis run on the Home Assistant machine.
 - The relay is text, not audio: the receiver hears Home Assistant's voice
   reading your words, two to three seconds after you stop talking.
-- The wake word becomes intercom-only on these devices. The Voice PE firmware
-  allows a single active wake word per device, so it cannot serve both the
-  intercom and the ordinary assistant. Switching a device's **Assistant**
-  selector back to a normal pipeline restores the assistant and stops the
-  intercom on that device.
+- Assist becomes an intercom and nothing else on the server. Home Assistant
+  checks sentence triggers before its built-in commands for every request to
+  its conversation agent, whichever pipeline, satellite, Companion app or web
+  UI it comes from, so the catch-all trigger answers all of them. "Turn on the
+  lights" typed into Assist on a phone is broadcast, not executed. (The Voice
+  PE firmware also allows only one active wake word per device.)
 
 ## Repository layout
 
@@ -61,11 +66,12 @@ security add-generic-password -a homeassistant -s ha-token -w "$(pbpaste)"   # t
 export HA_URL=http://homeassistant.local:8123                                # your server
 pip install -r tools/requirements.txt
 cp devices.example.yaml devices.yaml   # then edit
-python tools/push_config.py --dashboard --devices devices.yaml
+python tools/push_config.py --devices devices.yaml --dashboard
 ```
 
-That creates the helpers, the script "Intercom: broadcast", the automation
-"Intercom: broadcast by voice" and an "Intercom" dashboard with each device's
+That creates the helpers, the script "Intercom: broadcast", the automations
+"Intercom: broadcast by voice" and "Intercom: phone notification actions", sets
+the phone list, and creates an "Intercom" dashboard with each device's
 controls, a sound-level graph, the transcript log and tuning notes. All are
 editable in the UI afterwards. (Alternative without the API: copy the package
 file to `/config/packages/` and enable packages in `configuration.yaml`; then
@@ -166,6 +172,30 @@ to trigger the other, both would relay the same sentence. The automation
 drops a message that equals the previous one, within 20 s, from a different
 device. Dropped ones still appear in the transcript log, marked as echoes.
 
+## Phone notifications
+
+Every relayed message is pushed to the phones listed under `phones` in
+`devices.yaml` (stored in `input_text.intercom_phones`), titled with the room
+it came from. Each entry is a Companion app notify service such as
+`mobile_app_my_phone`. The notification has two buttons:
+
+- **Reply** opens a text field; what you send is announced on every device
+  and pushed to the other phones, and logged as "typed" in the transcripts.
+- **Mute shouts 30 min** turns shout-to-talk off on every device and back on
+  when `timer.intercom_shout_mute` finishes. Tapping it again restarts the 30
+  minutes. The wake word and the button keep working. Unmuting turns every
+  shout switch on, including one you had switched off by hand.
+
+Tapping the notification opens the Intercom dashboard. The **Push to phones**
+switch on the dashboard turns pushes off. On iOS a notification cannot be
+read aloud; on Android the Companion app can speak it with a `TTS` message if
+you want a phone to behave like another speaker.
+
+Pushes go through Home Assistant's push relay to Apple or Google, so the
+message text leaves your network there (encrypted in transit). Without a Home
+Assistant Cloud subscription the relay has a daily per-device limit; see the
+Companion app documentation.
+
 ## Privacy notes
 
 The microphone is always on for wake-word detection, on the device, as with
@@ -179,8 +209,8 @@ shout-to-talk off on a schedule.
 
 ## Tools
 
-- `tools/push_config.py [--dashboard --devices devices.yaml]` pushes the
-  package, and renders and saves the dashboard.
+- `tools/push_config.py --devices devices.yaml [--dashboard]` pushes the
+  package and the phone list, and renders and saves the dashboard.
 - `tools/monitor.py [--log FILE]` prints every pipeline run (device, text
   heard, errors), announcement and device drop-out as it happens.
 - `tools/stt_benchmark.py clip.wav` times the speech-to-text stage with a

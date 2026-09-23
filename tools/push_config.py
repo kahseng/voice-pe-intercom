@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Push the intercom configuration to Home Assistant through its API.
 
-  python tools/push_config.py              helpers, script and automation from
-                                           homeassistant/packages/voice_intercom.yaml
-  python tools/push_config.py --dashboard --devices devices.yaml
-                                           also render and save the "voice-intercom"
-                                           dashboard for the devices listed in that file
-                                           (see devices.example.yaml)
+  python tools/push_config.py --devices devices.yaml [--dashboard]
 
-The script lands in scripts.yaml and the automation in automations.yaml, both
-editable in the UI afterwards. Safe to re-run: existing helpers are left alone,
-the script and automation are replaced.
+  - creates the helpers from homeassistant/packages/voice_intercom.yaml that do
+    not exist yet (input_text, input_boolean, timer); turns "push to phones" on
+    when it is first created
+  - replaces the script and the automations (scripts.yaml / automations.yaml,
+    editable in the UI afterwards)
+  - sets input_text.intercom_phones from the "phones" list in devices.yaml
+  - with --dashboard, renders and saves the "voice-intercom" dashboard for the
+    devices in devices.yaml (see devices.example.yaml)
+
+--devices is optional without --dashboard. Safe to re-run.
 """
 from __future__ import annotations
 
@@ -63,7 +65,11 @@ def render_dashboard(devices: list[dict]) -> dict:
         {"type": "entities", "entities": [
             {"entity": "input_text.intercom_last_message", "name": "Last message"},
             {"entity": "input_text.intercom_last_sender", "name": "From"},
-            {"entity": "automation.intercom_broadcast_by_voice", "name": "Intercom automation"}]}]})
+            {"entity": "input_boolean.intercom_push_to_phones", "name": "Push to phones"},
+            {"entity": "input_text.intercom_phones", "name": "Phones"},
+            {"entity": "timer.intercom_shout_mute", "name": "Shouts muted from a phone"},
+            {"entity": "automation.intercom_broadcast_by_voice", "name": "Intercom automation"},
+            {"entity": "automation.intercom_phone_notification_actions", "name": "Phone buttons automation"}]}]})
     sections.append({"type": "grid", "column_span": n, "cards": [
         {"type": "heading", "heading": "Sound level, last 30 minutes (dB, 0 = loudest)", "icon": "mdi:waveform"},
         {"type": "history-graph", "hours_to_show": 0.5, "refresh_interval": 5, "grid_options": {"columns": "full"},
@@ -85,18 +91,29 @@ async def main() -> None:
     status, states = await rest("GET", "/api/states")
     existing = {s["entity_id"] for s in states}
 
-    cmds = []
-    for domain in ("input_text", "input_boolean"):
+    devices_cfg = {}
+    if "--devices" in sys.argv:
+        devices_cfg = yaml.safe_load(pathlib.Path(sys.argv[sys.argv.index("--devices") + 1]).read_text()) or {}
+
+    cmds, names = [], []
+    for domain in ("input_text", "input_boolean", "timer"):
         for object_id, cfg in (pkg.get(domain) or {}).items():
             if f"{domain}.{object_id}" not in existing:
                 cmd = {"type": f"{domain}/create", "name": cfg["name"], "icon": cfg.get("icon")}
                 if domain == "input_text":
                     cmd["max"] = cfg.get("max", 255)
+                if domain == "timer":
+                    cmd["duration"] = cfg.get("duration", "00:30:00")
+                    cmd["restore"] = cfg.get("restore", False)
                 cmds.append(cmd)
-    for r in await ws(cmds) if cmds else []:
-        print("helper:", "created" if r["success"] else r.get("error"))
+                names.append(f"{domain}.{object_id}")
+    for name, r in zip(names, await ws(cmds) if cmds else []):
+        print(f"helper {name}:", "created" if r["success"] else r.get("error"))
     if not cmds:
         print("helpers: already present")
+    if "input_boolean.intercom_push_to_phones" in names:
+        await rest("POST", "/api/services/input_boolean/turn_on", {"entity_id": "input_boolean.intercom_push_to_phones"})
+        print("push to phones: turned on")
 
     for object_id, cfg in (pkg.get("script") or {}).items():
         status, body = await rest("POST", f"/api/config/script/config/{object_id}", cfg)
@@ -108,10 +125,16 @@ async def main() -> None:
         status, body = await rest("POST", f"/api/config/automation/config/{auto_id}", auto)
         print(f"automation {auto_id}: {status} {body}")
 
+    if "phones" in devices_cfg:
+        value = ", ".join(devices_cfg["phones"] or [])
+        status, _ = await rest("POST", "/api/services/input_text/set_value",
+                               {"entity_id": "input_text.intercom_phones", "value": value})
+        print(f"phones: {value or '(none)'} ({status})")
+
     if "--dashboard" in sys.argv:
-        if "--devices" not in sys.argv:
+        if "devices" not in devices_cfg:
             sys.exit("--dashboard needs --devices <devices.yaml> (see devices.example.yaml)")
-        devices = yaml.safe_load(pathlib.Path(sys.argv[sys.argv.index("--devices") + 1]).read_text())["devices"]
+        devices = devices_cfg["devices"]
         cfg = render_dashboard(devices)
         dashboards = (await ws([{"type": "lovelace/dashboards/list"}]))[0]["result"]
         if not any(d.get("url_path") == DASHBOARD_PATH for d in dashboards):

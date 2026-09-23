@@ -2,7 +2,7 @@
 # Voice PE Volume Triggered Intercom - Home Assistant side
 #
 # Install with the API (recommended, everything stays editable in the UI):
-#     python tools/push_config.py --dashboard
+#     python tools/push_config.py --devices devices.yaml --dashboard
 # or as a package: copy to /config/packages/voice_intercom.yaml and add
 #     homeassistant:
 #       packages: !include_dir_named packages
@@ -10,8 +10,15 @@
 #
 # Behaviour: anything said to a device after the wake word, a single press of
 # the centre button, or a shout (custom firmware) is announced word for word on
-# every other Assist satellite. No chime, no confirmation, nothing is parsed.
+# every other Assist satellite and pushed to the phones listed in
+# input_text.intercom_phones. The notification has a Reply button (typed text
+# is announced on every device) and a "Mute shouts 30 min" button.
 # Every transcript is written to the logbook; echoes are dropped (see below).
+#
+# Note: the catch-all sentence trigger "{message}" takes precedence over Home
+# Assistant's built-in commands for ALL input to the Home Assistant
+# conversation agent, from any pipeline, the Companion app or the web UI.
+# On a server running this, Assist is an intercom and nothing else.
 # =============================================================================
 
 input_text:
@@ -23,24 +30,45 @@ input_text:
     name: Intercom last message
     icon: mdi:message-text
     max: 255
+  intercom_phones:
+    # Comma-separated notify services of the Companion app, e.g.
+    # "mobile_app_my_phone, mobile_app_partner_phone". Set by push_config.py
+    # from the "phones" list in devices.yaml.
+    name: Intercom phones
+    icon: mdi:cellphone-message
+    max: 255
 
 input_boolean:
   intercom_transcripts:
+    # Never changes state. Transcripts are logbook entries against it, so the
+    # dashboard's logbook card shows only transcripts.
     name: Intercom transcripts
     icon: mdi:text-box-outline
+  intercom_push_to_phones:
+    name: Intercom push to phones
+    icon: mdi:cellphone-message
+
+timer:
+  intercom_shout_mute:
+    name: Intercom shout mute
+    icon: mdi:bullhorn-variant-outline
+    duration: "00:30:00"
+    restore: true
 
 script:
   intercom_broadcast:
     alias: "Intercom: broadcast"
     icon: mdi:bullhorn
     description: >-
-      Announce a message on Assist satellites. With no targets it goes to every
-      available satellite except the source.
+      Announce a message on Assist satellites and push it to the intercom
+      phones. With no targets it goes to every available satellite except the
+      source.
     mode: parallel
     max: 10
     fields:
       message:
         name: Message
+        description: Text to speak.
         required: true
         selector:
           text:
@@ -51,6 +79,18 @@ script:
         selector:
           entity:
             domain: assist_satellite
+      sender:
+        name: Sender
+        description: Name shown on the phone when the message did not come from a satellite.
+        required: false
+        selector:
+          text:
+      exclude_phone:
+        name: Exclude phone
+        description: Notify service (e.g. mobile_app_my_phone) that sent the message; it gets no push.
+        required: false
+        selector:
+          text:
       targets:
         name: Targets
         description: Optional. Leave empty for every satellite except the source.
@@ -72,8 +112,13 @@ script:
           target_list: >-
             {% set base = explicit_targets if explicit_targets | count > 0 else all_satellites %}
             {{ base | reject('eq', source_id) | list }}
-      - condition: template
-        value_template: "{{ target_list | count > 0 }}"
+          from_name: >-
+            {% if source_id %}{{ area_name(source_id) or state_attr(source_id, 'friendly_name') }}
+            {%- else %}{{ sender | default('Intercom', true) }}{% endif %}
+          phones: >-
+            {{ states('input_text.intercom_phones').split(',') | map('trim')
+               | reject('in', ['', 'unknown', 'unavailable'])
+               | reject('eq', exclude_phone | default('', true)) | list }}
       - action: input_text.set_value
         target:
           entity_id: input_text.intercom_last_sender
@@ -84,21 +129,56 @@ script:
           entity_id: input_text.intercom_last_message
         data:
           value: "{{ message[:255] }}"
-      - action: assist_satellite.announce
-        continue_on_error: true
-        target:
-          entity_id: "{{ target_list }}"
-        data:
-          message: "{{ message | trim }}"
-          preannounce: false
+      # Push first: it is quick, while announce waits for playback to finish.
+      - if:
+          - condition: state
+            entity_id: input_boolean.intercom_push_to_phones
+            state: "on"
+          - condition: template
+            value_template: "{{ phones | count > 0 }}"
+        then:
+          - repeat:
+              for_each: "{{ phones }}"
+              sequence:
+                - action: "notify.{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Intercom · {{ from_name }}"
+                    message: "{{ message | trim }}"
+                    data:
+                      group: intercom             # iOS: one thread
+                      channel: Intercom           # Android: own notification channel
+                      url: /voice-intercom        # iOS: tap opens the dashboard
+                      clickAction: /voice-intercom  # Android: same
+                      intercom_phone: "{{ repeat.item }}"  # Android returns data fields
+                      action_data:                # iOS returns action_data
+                        phone: "{{ repeat.item }}"
+                      actions:
+                        - action: INTERCOM_REPLY
+                          title: Reply
+                          behavior: textInput
+                          textInputButtonTitle: Send
+                          textInputPlaceholder: Message for the house
+                        - action: INTERCOM_MUTE_SHOUT
+                          title: Mute shouts 30 min
+      - if:
+          - condition: template
+            value_template: "{{ target_list | count > 0 }}"
+        then:
+          - action: assist_satellite.announce
+            continue_on_error: true
+            target:
+              entity_id: "{{ target_list }}"
+            data:
+              message: "{{ message | trim }}"
+              preannounce: false
 
 automation:
   - id: voice_intercom_broadcast_by_voice
     alias: "Intercom: broadcast by voice"
     description: >-
       Anything said after the wake word or a single button press is announced
-      verbatim on every other satellite. The wildcard-only sentence matches
-      everything, so this pipeline's wake word is intercom-only.
+      verbatim on every other satellite and pushed to the intercom phones.
     mode: parallel
     triggers:
       - trigger: conversation
@@ -118,15 +198,20 @@ automation:
             {% set age = (now() - states.input_text.intercom_last_message.last_changed).total_seconds() %}
             {% set same_sender = (trigger.satellite_id or '') == states('input_text.intercom_last_sender') %}
             {{ msg == last and age < 20 and not same_sender }}
-          # Logged against a helper that never changes state, so the dashboard's
-          # logbook card shows only transcripts.
-          sat: input_boolean.intercom_transcripts
-          source_name: "{{ area_name(trigger.satellite_id) if trigger.satellite_id else 'test' }}"
+          # Not from a satellite: Assist in the Companion app or the web UI.
+          device_name: >-
+            {{ (device_attr(trigger.device_id, 'name_by_user') or device_attr(trigger.device_id, 'name'))
+               if trigger.device_id else '' }}
+          source_name: >-
+            {% if trigger.satellite_id %}{{ area_name(trigger.satellite_id) or state_attr(trigger.satellite_id, 'friendly_name') }}
+            {%- else %}{{ device_name or 'Assist' }}{% endif %}
+          from_phone: >-
+            {{ 'mobile_app_' ~ (device_name | slugify) if (not trigger.satellite_id and device_name) else '' }}
       # Every transcript goes to the logbook (shown on the Intercom dashboard).
       - action: logbook.log
         data:
           name: "{{ source_name }}"
-          entity_id: "{{ sat }}"
+          entity_id: input_boolean.intercom_transcripts
           message: "heard \"{{ trigger.slots.message }}\"{{ ' (echo, not sent)' if echo else '' }}"
       - condition: template
         alias: Drop an echo
@@ -138,3 +223,86 @@ automation:
           variables:
             message: "{{ trigger.slots.message }}"
             source: "{{ trigger.satellite_id or '' }}"
+            sender: "{{ source_name }}"
+            exclude_phone: "{{ from_phone }}"
+
+  - id: voice_intercom_phone_actions
+    alias: "Intercom: phone notification actions"
+    description: >-
+      Reply button: the typed text is announced on every satellite and pushed to
+      the other phones. Mute button: shout-to-talk off on every device for 30
+      minutes (tapping again restarts the 30 minutes).
+    mode: parallel
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: INTERCOM_REPLY
+        id: reply
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: INTERCOM_MUTE_SHOUT
+        id: mute
+      - trigger: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.intercom_shout_mute
+        id: unmute
+    actions:
+      - variables:
+          phone: >-
+            {% set d = trigger.event.data %}
+            {{ (d.get('action_data') or {}).get('phone') or d.get('intercom_phone') or '' }}
+          phone_name: >-
+            {{ (phone | replace('mobile_app_', '') | replace('_', ' ') | title) if phone else 'Phone' }}
+          shout_switches: >-
+            {{ states.switch | map(attribute='entity_id') | select('search', '_shout_to_talk$') | list }}
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: reply
+              - condition: template
+                value_template: "{{ (trigger.event.data.get('reply_text') or '') | trim | length > 0 }}"
+            sequence:
+              - action: logbook.log
+                data:
+                  name: "{{ phone_name }}"
+                  entity_id: input_boolean.intercom_transcripts
+                  message: "typed \"{{ trigger.event.data.reply_text | trim }}\""
+              - action: script.turn_on
+                target:
+                  entity_id: script.intercom_broadcast
+                data:
+                  variables:
+                    message: "{{ trigger.event.data.reply_text | trim }}"
+                    sender: "{{ phone_name }}"
+                    exclude_phone: "{{ phone }}"
+          - conditions:
+              - condition: trigger
+                id: mute
+              - condition: template
+                value_template: "{{ shout_switches | count > 0 }}"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: "{{ shout_switches }}"
+              - action: timer.start
+                target:
+                  entity_id: timer.intercom_shout_mute
+                data:
+                  duration: "00:30:00"
+              - action: logbook.log
+                data:
+                  name: "{{ phone_name }}"
+                  entity_id: input_boolean.intercom_transcripts
+                  message: muted shout-to-talk for 30 minutes
+          - conditions:
+              - condition: trigger
+                id: unmute
+              - condition: template
+                value_template: "{{ shout_switches | count > 0 }}"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ shout_switches }}"

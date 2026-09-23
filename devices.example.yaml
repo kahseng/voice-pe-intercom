@@ -14,3 +14,9 @@ devices:
     icon: mdi:silverware-fork-knife
     suffix: bbbbbb
     entity_prefix: kitchen_home_assistant_voice_bbbbbb
+
+# Companion app phones that get a push for every message. Each entry is the
+# phone's notify service without "notify.", listed under Developer tools >
+# Actions as notify.mobile_app_<phone name>. Leave empty for no pushes.
+phones:
+  - mobile_app_your_phone
