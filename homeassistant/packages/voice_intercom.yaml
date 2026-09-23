@@ -30,6 +30,11 @@ input_text:
     name: Intercom last message
     icon: mdi:message-text
     max: 255
+  intercom_compose:
+    # The text box on the Intercom dashboard; "Send" announces and clears it.
+    name: Intercom message
+    icon: mdi:message-draw
+    max: 255
   intercom_phones:
     # Comma-separated notify services of the Companion app, e.g.
     # "mobile_app_my_phone, mobile_app_partner_phone". Set by push_config.py
@@ -87,7 +92,7 @@ script:
           text:
       exclude_phone:
         name: Exclude phone
-        description: Notify service (e.g. mobile_app_my_phone) that sent the message; it gets no push.
+        description: Notify services (comma-separated, e.g. mobile_app_my_phone) that get no push, usually the sender's.
         required: false
         selector:
           text:
@@ -118,7 +123,7 @@ script:
           phones: >-
             {{ states('input_text.intercom_phones').split(',') | map('trim')
                | reject('in', ['', 'unknown', 'unavailable'])
-               | reject('eq', exclude_phone | default('', true)) | list }}
+               | reject('in', (exclude_phone | default('', true)).split(',') | map('trim') | list) | list }}
       - action: input_text.set_value
         target:
           entity_id: input_text.intercom_last_sender
@@ -172,6 +177,49 @@ script:
             data:
               message: "{{ message | trim }}"
               preannounce: false
+
+  intercom_send_typed:
+    alias: "Intercom: send typed message"
+    icon: mdi:send
+    description: >-
+      Announce the text in input_text.intercom_compose on every device, push it
+      to the phones of everyone except the person who pressed Send, and clear
+      the box. Wired to the Send button on the Intercom dashboard.
+    mode: queued
+    sequence:
+      # On a phone, tapping Send also commits the text box; give that a moment.
+      - wait_template: "{{ states('input_text.intercom_compose') | trim | length > 0 }}"
+        timeout: "00:00:02"
+        continue_on_timeout: true
+      - variables:
+          text: "{{ states('input_text.intercom_compose') | trim }}"
+          person: >-
+            {{ states.person | selectattr('attributes.user_id', 'eq', context.user_id)
+               | map(attribute='entity_id') | first | default('') }}
+          sender: "{{ state_attr(person, 'friendly_name') if person else 'Dashboard' }}"
+          own_phones: >-
+            {{ (state_attr(person, 'device_trackers') or []) | map('replace', 'device_tracker.', 'mobile_app_')
+               | join(',') if person else '' }}
+      - condition: template
+        value_template: "{{ text not in ['', 'unknown', 'unavailable'] }}"
+      - action: logbook.log
+        data:
+          name: "{{ sender }}"
+          entity_id: input_boolean.intercom_transcripts
+          message: "typed \"{{ text }}\""
+      - action: script.turn_on
+        target:
+          entity_id: script.intercom_broadcast
+        data:
+          variables:
+            message: "{{ text }}"
+            sender: "{{ sender }}"
+            exclude_phone: "{{ own_phones }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.intercom_compose
+        data:
+          value: ""
 
 automation:
   - id: voice_intercom_broadcast_by_voice

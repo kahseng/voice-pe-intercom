@@ -172,6 +172,20 @@ to trigger the other, both would relay the same sentence. The automation
 drops a message that equals the previous one, within 20 s, from a different
 device. Dropped ones still appear in the transcript log, marked as echoes.
 
+## Sending from a phone or browser
+
+The top of the Intercom dashboard has a **Message** box and a **Send** button:
+type, tap Send, and the text is announced on every speaker, pushed to
+everyone else's phones, and logged as "typed". The sender is the Home
+Assistant person who pressed Send, so their own phones get no push. Assist in
+the Companion app works too (typed, or spoken if the app's Assist uses a
+pipeline with free-text speech-to-text), because the catch-all trigger
+answers all Assist input.
+
+Both need the phone to reach Home Assistant, so away from home they need
+remote access (Home Assistant Cloud, a VPN or an external URL). Push
+notifications themselves arrive anywhere.
+
 ## Phone notifications
 
 Every relayed message is pushed to the phones listed under `phones` in
@@ -186,7 +200,11 @@ it came from. Each entry is a Companion app notify service such as
   minutes. The wake word and the button keep working. Unmuting turns every
   shout switch on, including one you had switched off by hand.
 
-Tapping the notification opens the Intercom dashboard. The **Push to phones**
+Tapping the notification opens the Intercom dashboard. If the buttons show
+"Loading actions..." and never appear, that is a Companion app issue (seen
+with the iOS app 2026.9.x); the dashboard's Send box does the same as Reply.
+Resetting the Push ID under the app's Settings > Companion App >
+Notifications and force-quitting the app is the usual first step. The **Push to phones**
 switch on the dashboard turns pushes off. On iOS a notification cannot be
 read aloud; on Android the Companion app can speak it with a `TTS` message if
 you want a phone to behave like another speaker.

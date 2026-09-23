@@ -59,7 +59,14 @@ def device_section(d: dict) -> dict:
 def render_dashboard(devices: list[dict]) -> dict:
     """The Intercom dashboard: devices side by side, then the sound graph, transcripts and notes."""
     n = max(2, min(4, len(devices)))
-    sections = [device_section(d) for d in devices]
+    sections = [{"type": "grid", "column_span": 2, "cards": [
+        {"type": "heading", "heading": "Send a message", "icon": "mdi:send"},
+        {"type": "entities", "entities": [
+            {"entity": "input_text.intercom_compose", "name": "Message"},
+            {"type": "button", "name": "Announce on every speaker", "icon": "mdi:bullhorn",
+             "action_name": "Send",
+             "tap_action": {"action": "perform-action", "perform_action": "script.intercom_send_typed"}}]}]}]
+    sections += [device_section(d) for d in devices]
     sections.append({"type": "grid", "column_span": 2, "cards": [
         {"type": "heading", "heading": "Status", "icon": "mdi:bullhorn"},
         {"type": "entities", "entities": [
