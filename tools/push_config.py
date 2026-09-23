@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Push the intercom configuration to Home Assistant through its API.
 
-  python tools/push_config.py --devices devices.yaml [--dashboard]
+  python tools/push_config.py --devices devices.yaml [--dashboard [--hide-from-overview]]
 
   - creates the helpers from homeassistant/packages/voice_intercom.yaml that do
     not exist yet (input_text, input_boolean, timer); turns "push to phones" on
@@ -9,8 +9,14 @@
   - replaces the script and the automations (scripts.yaml / automations.yaml,
     editable in the UI afterwards)
   - sets input_text.intercom_phones from the "phones" list in devices.yaml
-  - with --dashboard, renders and saves the "voice-intercom" dashboard for the
-    devices in devices.yaml (see devices.example.yaml)
+  - records the Home Assistant administrators in input_text.intercom_admins
+    (only their phones get the Mute button, and only they can mute)
+  - with --dashboard, renders and saves two dashboards for the devices in
+    devices.yaml (see devices.example.yaml): "Intercom" for everyone (Send box
+    and last message) and "Intercom settings" for administrators only
+  - with --hide-from-overview as well, hides the intercom's helpers, scripts,
+    automations and timer and the Voice PE controls without an entity category
+    from the auto-generated Overview dashboard
 
 --devices is optional without --dashboard. Safe to re-run.
 """
@@ -25,7 +31,8 @@ from ha import rest, run, ws
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "homeassistant" / "packages" / "voice_intercom.yaml"
-DASHBOARD_PATH = "voice-intercom"
+FAMILY_PATH = "voice-intercom"            # everyone: send a message, see the last one
+SETTINGS_PATH = "voice-intercom-settings"  # administrators only: everything else
 
 TUNING_NOTES = (
     "1. Stand where you normally use the device.\n"
@@ -38,6 +45,24 @@ TUNING_NOTES = (
     "The slider is a floor. During sustained conversation nearby the device raises its *effective threshold* "
     "to the ambient speech level plus the *adaptive margin*, and lets it decay 3 dB per minute once it is quiet."
 )
+
+LAST_MESSAGE = (
+    "{% set msg = states('input_text.intercom_last_message') %}"
+    "{% if msg not in ['', 'unknown', 'unavailable'] %}"
+    "{% set who = states('input_text.intercom_last_from') %}"
+    "**{{ who if who not in ['', 'unknown', 'unavailable'] else 'Intercom' }}**, "
+    "{{ relative_time(states.input_text.intercom_last_message.last_changed) }} ago\n\n> {{ msg }}"
+    "{% else %}No messages yet.{% endif %}"
+)
+
+SEND_SECTION = {"type": "grid", "column_span": 2, "cards": [
+    {"type": "heading", "heading": "Send a message", "icon": "mdi:send"},
+    {"type": "entities", "entities": [
+        {"entity": "input_text.intercom_compose", "name": "Message"},
+        {"type": "button", "name": "Announce on every speaker (or press Return)", "icon": "mdi:bullhorn",
+         "action_name": "Send",
+         "tap_action": {"action": "perform-action", "perform_action": "script.intercom_send_typed"}}]},
+    {"type": "markdown", "content": LAST_MESSAGE}]}
 
 
 def device_section(d: dict) -> dict:
@@ -57,24 +82,22 @@ def device_section(d: dict) -> dict:
             {"entity": f"switch.home_assistant_voice_{sfx}_mute", "name": "Microphone mute"}]}]}
 
 
-def render_dashboard(devices: list[dict]) -> dict:
-    """The Intercom dashboard: devices side by side, then the sound graph, transcripts and notes."""
+def render_family() -> dict:
+    """What every household member sees: the Send box and the last message."""
+    return {"title": "Intercom", "views": [{"title": "Intercom", "path": "intercom", "type": "sections",
+                                            "max_columns": 2, "sections": [SEND_SECTION]}]}
+
+
+def render_settings(devices: list[dict]) -> dict:
+    """Administrators only: devices, status, sound graph, transcripts, tuning notes."""
     n = max(2, min(4, len(devices)))
-    sections = [{"type": "grid", "column_span": 2, "cards": [
-        {"type": "heading", "heading": "Send a message", "icon": "mdi:send"},
-        {"type": "entities", "entities": [
-            {"entity": "input_text.intercom_compose", "name": "Message"},
-            {"type": "button", "name": "Announce on every speaker (or press Return)", "icon": "mdi:bullhorn",
-             "action_name": "Send",
-             "tap_action": {"action": "perform-action", "perform_action": "script.intercom_send_typed"}}]}]}]
-    sections += [device_section(d) for d in devices]
+    sections = [SEND_SECTION] + [device_section(d) for d in devices]
     sections.append({"type": "grid", "column_span": 2, "cards": [
         {"type": "heading", "heading": "Status", "icon": "mdi:bullhorn"},
         {"type": "entities", "entities": [
-            {"entity": "input_text.intercom_last_message", "name": "Last message"},
-            {"entity": "input_text.intercom_last_sender", "name": "From"},
             {"entity": "input_boolean.intercom_push_to_phones", "name": "Push to phones"},
             {"entity": "input_text.intercom_phones", "name": "Phones"},
+            {"entity": "input_text.intercom_admins", "name": "Administrators (user ids)"},
             {"entity": "timer.intercom_shout_mute", "name": "Shouts muted from a phone"},
             {"entity": "automation.intercom_broadcast_by_voice", "name": "Intercom automation"},
             {"entity": "automation.intercom_phone_notification_actions", "name": "Phone buttons automation"},
@@ -91,8 +114,42 @@ def render_dashboard(devices: list[dict]) -> dict:
     sections.append({"type": "grid", "column_span": 2, "cards": [
         {"type": "heading", "heading": "Tuning shout-to-talk", "icon": "mdi:tune"},
         {"type": "markdown", "grid_options": {"columns": "full"}, "content": TUNING_NOTES}]})
-    return {"title": "Intercom", "views": [{"title": "Intercom", "path": "intercom", "type": "sections",
-                                            "max_columns": n, "sections": sections}]}
+    return {"title": "Intercom settings", "views": [{"title": "Intercom settings", "path": "settings", "type": "sections",
+                                                     "max_columns": n, "sections": sections}]}
+
+
+async def save_dashboard(url_path: str, title: str, icon: str, require_admin: bool, cfg: dict) -> None:
+    dashboards = (await ws([{"type": "lovelace/dashboards/list"}]))[0]["result"]
+    existing = next((d for d in dashboards if d.get("url_path") == url_path), None)
+    if existing is None:
+        r = (await ws([{"type": "lovelace/dashboards/create", "url_path": url_path, "title": title, "icon": icon,
+                        "mode": "storage", "require_admin": require_admin, "show_in_sidebar": True}]))[0]
+        print(f"dashboard {url_path}:", "created" if r["success"] else r.get("error"))
+    elif existing.get("require_admin") != require_admin or existing.get("title") != title:
+        r = (await ws([{"type": "lovelace/dashboards/update", "dashboard_id": existing["id"], "title": title,
+                        "require_admin": require_admin}]))[0]
+        print(f"dashboard {url_path}: access updated" if r["success"] else r.get("error"))
+    r = (await ws([{"type": "lovelace/config/save", "url_path": url_path, "config": cfg}]))[0]
+    print(f"dashboard {url_path} config:", "saved" if r["success"] else r.get("error"),
+          "(administrators only)" if require_admin else "(everyone)")
+
+
+async def hide_from_overview(devices: list[dict]) -> None:
+    """Hide the intercom's helpers, scripts, automations and timer, and the Voice PE
+    controls without an entity category, from the auto-generated Overview. Hidden
+    entities keep working and still show on the dashboards above."""
+    ents = (await ws([{"type": "config/entity_registry/list"}]))[0]["result"]
+    sat_devices = {e["device_id"] for e in ents
+                   if e["entity_id"] in {f"assist_satellite.home_assistant_voice_{d['suffix']}_assist_satellite" for d in devices}}
+    targets = [e for e in ents if not e.get("hidden_by") and (
+        (e["entity_id"].split(".")[0] in ("input_text", "input_boolean", "timer", "script", "automation")
+         and "intercom" in e["entity_id"])
+        or (e.get("device_id") in sat_devices and not e.get("entity_category")))]
+    for e in targets:
+        r = (await ws([{"type": "config/entity_registry/update", "entity_id": e["entity_id"], "hidden_by": "user"}]))[0]
+        print(f"hidden from Overview: {e['entity_id']}" if r["success"] else f"hide failed {e['entity_id']}: {r.get('error')}")
+    if not targets:
+        print("hidden from Overview: nothing new")
 
 
 async def main() -> None:
@@ -151,20 +208,21 @@ async def main() -> None:
                                {"entity_id": "input_text.intercom_phones", "value": value})
         print(f"phones: {value or '(none)'} ({status})")
 
+    users = (await ws([{"type": "config/auth/list"}]))[0]["result"]
+    admins = [u["id"] for u in users if not u.get("system_generated") and u.get("is_active")
+              and (u.get("is_owner") or "system-admin" in (u.get("group_ids") or []))]
+    status, _ = await rest("POST", "/api/services/input_text/set_value",
+                           {"entity_id": "input_text.intercom_admins", "value": ",".join(admins)})
+    print(f"administrators: {len(admins)} ({status})")
+
     if "--dashboard" in sys.argv:
         if "devices" not in devices_cfg:
             sys.exit("--dashboard needs --devices <devices.yaml> (see devices.example.yaml)")
         devices = devices_cfg["devices"]
-        cfg = render_dashboard(devices)
-        dashboards = (await ws([{"type": "lovelace/dashboards/list"}]))[0]["result"]
-        if not any(d.get("url_path") == DASHBOARD_PATH for d in dashboards):
-            r = (await ws([{"type": "lovelace/dashboards/create", "url_path": DASHBOARD_PATH,
-                            "title": cfg.get("title", "Intercom"), "icon": "mdi:bullhorn",
-                            "mode": "storage", "require_admin": False, "show_in_sidebar": True}]))[0]
-            print("dashboard:", "created" if r["success"] else r.get("error"))
-        r = (await ws([{"type": "lovelace/config/save", "url_path": DASHBOARD_PATH, "config": cfg}]))[0]
-        print("dashboard config:", "saved" if r["success"] else r.get("error"))
-
+        await save_dashboard(FAMILY_PATH, "Intercom", "mdi:bullhorn", False, render_family())
+        await save_dashboard(SETTINGS_PATH, "Intercom settings", "mdi:tune", True, render_settings(devices))
+        if "--hide-from-overview" in sys.argv:
+            await hide_from_overview(devices)
 
 if __name__ == "__main__":
     run(main())

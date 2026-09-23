@@ -67,14 +67,26 @@ security add-generic-password -a homeassistant -s ha-token -w "$(pbpaste)"   # t
 export HA_URL=http://homeassistant.local:8123                                # your server
 pip install -r tools/requirements.txt
 cp devices.example.yaml devices.yaml   # then edit
-python tools/push_config.py --devices devices.yaml --dashboard
+python tools/push_config.py --devices devices.yaml --dashboard --hide-from-overview
 ```
 
 That creates the helpers, the script "Intercom: broadcast", the automations
 "Intercom: broadcast by voice" and "Intercom: phone notification actions", sets
-the phone list, and creates an "Intercom" dashboard with each device's
-controls, a sound-level graph, the transcript log and tuning notes. All are
-editable in the UI afterwards. (Alternative without the API: copy the package
+the phone list, records who the administrators are, and creates two
+dashboards:
+
+- **Intercom**, for everyone: the Send box and the last message.
+- **Intercom settings**, for administrators only (hidden from other users'
+  sidebars): each device's controls, push settings, the sound-level graph,
+  the transcript log and tuning notes.
+
+`--hide-from-overview` also hides the intercom's helpers, scripts,
+automations and timer, and the Voice PE controls without an entity category,
+from the auto-generated Overview dashboard. They keep working. This is
+tidiness, not security: Home Assistant has no per-entity permissions, so a
+non-administrator account can still operate any entity through the API or the
+entity dialogs. Give each household member their own non-administrator
+account rather than sharing one. All of this is editable in the UI afterwards. (Alternative without the API: copy the package
 file to `/config/packages/` and enable packages in `configuration.yaml`; then
 do not also push it, or you get duplicates.)
 
@@ -206,7 +218,9 @@ it came from. Each entry is a Companion app notify service such as
 
 - **Reply** opens a text field; what you send is announced on every device
   and pushed to the other phones, and logged as "typed" in the transcripts.
-- **Mute shouts 30 min** turns shout-to-talk off on every device and back on
+- **Mute shouts 30 min** (administrators' phones only; a mute from a
+  non-administrator account is ignored) turns shout-to-talk off on every
+  device and back on
   when `timer.intercom_shout_mute` finishes. Tapping it again restarts the 30
   minutes. The wake word and the button keep working. Unmuting turns every
   shout switch on, including one you had switched off by hand.

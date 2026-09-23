@@ -30,6 +30,17 @@ input_text:
     name: Intercom last message
     icon: mdi:message-text
     max: 255
+  intercom_last_from:
+    # Display name of whoever sent the last message (room, person or phone).
+    name: Intercom last from
+    icon: mdi:account-voice
+    max: 255
+  intercom_admins:
+    # Comma-separated user ids of Home Assistant administrators; only their
+    # phones get the Mute button and only they can mute. Set by push_config.py.
+    name: Intercom admins
+    icon: mdi:shield-account
+    max: 255
   intercom_compose:
     # The text box on the Intercom dashboard; "Send" announces and clears it.
     name: Intercom message
@@ -120,6 +131,7 @@ script:
           from_name: >-
             {% if source_id %}{{ area_name(source_id) or state_attr(source_id, 'friendly_name') }}
             {%- else %}{{ sender | default('Intercom', true) }}{% endif %}
+          admins: "{{ states('input_text.intercom_admins').split(',') | map('trim') | list }}"
           phones: >-
             {{ states('input_text.intercom_phones').split(',') | map('trim')
                | reject('in', ['', 'unknown', 'unavailable'])
@@ -134,6 +146,11 @@ script:
           entity_id: input_text.intercom_last_message
         data:
           value: "{{ message[:255] }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.intercom_last_from
+        data:
+          value: "{{ from_name[:255] }}"
       # Push first: it is quick, while announce waits for playback to finish.
       - if:
           - condition: state
@@ -145,6 +162,18 @@ script:
           - repeat:
               for_each: "{{ phones }}"
               sequence:
+                - variables:
+                    # A phone belongs to an administrator when an admin's person
+                    # entry lists its device tracker.
+                    owner_is_admin: >-
+                      {% set tracker = 'device_tracker.' ~ (repeat.item | replace('mobile_app_', '')) %}
+                      {{ states.person | selectattr('attributes.user_id', 'in', admins)
+                         | selectattr('attributes.device_trackers', 'contains', tracker) | list | count > 0 }}
+                    phone_actions: >-
+                      {% set reply = {'action': 'INTERCOM_REPLY', 'title': 'Reply', 'behavior': 'textInput',
+                                      'textInputButtonTitle': 'Send', 'textInputPlaceholder': 'Message for the house'} %}
+                      {% set mute = {'action': 'INTERCOM_MUTE_SHOUT', 'title': 'Mute shouts 30 min'} %}
+                      {{ [reply, mute] if owner_is_admin else [reply] }}
                 - action: "notify.{{ repeat.item }}"
                   continue_on_error: true
                   data:
@@ -158,14 +187,7 @@ script:
                       intercom_phone: "{{ repeat.item }}"  # Android returns data fields
                       action_data:                # iOS returns action_data
                         phone: "{{ repeat.item }}"
-                      actions:
-                        - action: INTERCOM_REPLY
-                          title: Reply
-                          behavior: textInput
-                          textInputButtonTitle: Send
-                          textInputPlaceholder: Message for the house
-                        - action: INTERCOM_MUTE_SHOUT
-                          title: Mute shouts 30 min
+                      actions: "{{ phone_actions }}"
       - if:
           - condition: template
             value_template: "{{ target_list | count > 0 }}"
@@ -304,8 +326,9 @@ automation:
     alias: "Intercom: phone notification actions"
     description: >-
       Reply button: the typed text is announced on every satellite and pushed to
-      the other phones. Mute button: shout-to-talk off on every device for 30
-      minutes (tapping again restarts the 30 minutes).
+      the other phones. Mute button (administrators' phones only, and only
+      honoured from an administrator's account): shout-to-talk off on every
+      device for 30 minutes (tapping again restarts the 30 minutes).
     mode: parallel
     triggers:
       - trigger: event
@@ -332,6 +355,8 @@ automation:
             {{ (phone | replace('mobile_app_', '') | replace('_', ' ') | title) if phone else 'Phone' }}
           shout_switches: >-
             {{ states.switch | map(attribute='entity_id') | select('search', '_shout_to_talk$') | list }}
+          by_admin: >-
+            {{ (trigger.event.context.user_id or '') in states('input_text.intercom_admins').split(',') | map('trim') | list }}
       - choose:
           - conditions:
               - condition: trigger
@@ -356,7 +381,8 @@ automation:
               - condition: trigger
                 id: mute
               - condition: template
-                value_template: "{{ shout_switches | count > 0 }}"
+                alias: Only administrators can mute
+                value_template: "{{ by_admin and shout_switches | count > 0 }}"
             sequence:
               - action: switch.turn_off
                 target:
