@@ -47,9 +47,10 @@ input_text:
     icon: mdi:message-draw
     max: 255
   intercom_phones:
-    # Comma-separated notify services of the Companion app, e.g.
+    # "all" (the default): push to every Companion app device, including ones
+    # added later. Or a comma-separated list of notify services, e.g.
     # "mobile_app_my_phone, mobile_app_partner_phone". Set by push_config.py
-    # from the "phones" list in devices.yaml.
+    # from "phones" in devices.yaml.
     name: Intercom phones
     icon: mdi:cellphone-message
     max: 255
@@ -132,10 +133,19 @@ script:
             {% if source_id %}{{ area_name(source_id) or state_attr(source_id, 'friendly_name') }}
             {%- else %}{{ sender | default('Intercom', true) }}{% endif %}
           admins: "{{ states('input_text.intercom_admins').split(',') | map('trim') | list }}"
+          # "all" (or empty): every Companion app device, found through its
+          # device tracker, whose object id matches its notify service.
+          # Otherwise the comma-separated list in input_text.intercom_phones.
           phones: >-
-            {{ states('input_text.intercom_phones').split(',') | map('trim')
-               | reject('in', ['', 'unknown', 'unavailable'])
-               | reject('in', (exclude_phone | default('', true)).split(',') | map('trim') | list) | list }}
+            {% set configured = states('input_text.intercom_phones') | trim %}
+            {% if configured | lower in ['', 'all', 'unknown', 'unavailable'] %}
+              {% set base = integration_entities('mobile_app') | select('search', '^device_tracker[.]')
+                            | map('replace', 'device_tracker.', 'mobile_app_') | list %}
+            {% else %}
+              {% set base = configured.split(',') | map('trim') | reject('eq', '') | list %}
+            {% endif %}
+            {% set skip = (exclude_phone | default('', true)).split(',') | map('trim') | list %}
+            {{ base | reject('in', skip) | list }}
       - action: input_text.set_value
         target:
           entity_id: input_text.intercom_last_sender

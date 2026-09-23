@@ -15,8 +15,11 @@ devices:
     suffix: bbbbbb
     entity_prefix: kitchen_home_assistant_voice_bbbbbb
 
-# Companion app phones that get a push for every message. Each entry is the
-# phone's notify service without "notify.", listed under Developer tools >
-# Actions as notify.mobile_app_<phone name>. Leave empty for no pushes.
-phones:
-  - mobile_app_your_phone
+# Which Companion app devices get a push for every message:
+#   all   every device registered with the Companion app, including ones added
+#         later (the default)
+#   a list of notify services, without "notify.", e.g.
+#     phones:
+#       - mobile_app_my_phone
+#       - mobile_app_partner_phone
+phones: all

@@ -211,10 +211,13 @@ notifications themselves arrive anywhere.
 
 ## Phone notifications
 
-Every relayed message is pushed to the phones listed under `phones` in
-`devices.yaml` (stored in `input_text.intercom_phones`), titled with the room
-it came from. Each entry is a Companion app notify service such as
-`mobile_app_my_phone`. The notification has two buttons:
+Every relayed message is pushed, titled with the room or person it came
+from. By default (`phones: all` in `devices.yaml`) it goes to every device
+registered with the Companion app, so a phone or tablet added later gets
+pushes as soon as it is set up, with nothing to maintain. To limit it, list
+notify services instead (`mobile_app_my_phone`, ...); the setting is stored
+in `input_text.intercom_phones`. The sender's own devices are always
+skipped. The notification has two buttons:
 
 - **Reply** opens a text field; what you send is announced on every device
   and pushed to the other phones, and logged as "typed" in the transcripts.

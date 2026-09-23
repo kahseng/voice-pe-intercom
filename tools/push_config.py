@@ -8,7 +8,8 @@
     when it is first created
   - replaces the script and the automations (scripts.yaml / automations.yaml,
     editable in the UI afterwards)
-  - sets input_text.intercom_phones from the "phones" list in devices.yaml
+  - sets input_text.intercom_phones from "phones" in devices.yaml ("all", the
+    default, or a list)
   - records the Home Assistant administrators in input_text.intercom_admins
     (only their phones get the Mute button, and only they can mute)
   - with --dashboard, renders and saves two dashboards for the devices in
@@ -207,7 +208,8 @@ async def main() -> None:
         print(f"automation {auto_id}: {status} {body}")
 
     if "phones" in devices_cfg:
-        value = ", ".join(devices_cfg["phones"] or [])
+        phones = devices_cfg["phones"]
+        value = "all" if phones in (None, "all") else ", ".join(phones)
         status, _ = await rest("POST", "/api/services/input_text/set_value",
                                {"entity_id": "input_text.intercom_phones", "value": value})
         print(f"phones: {value or '(none)'} ({status})")
