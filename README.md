@@ -97,10 +97,11 @@ is `stt.faster_whisper` whichever engine the add-on runs.
 ### LED ring brightness
 
 The ring's listening and replying animations use the brightness stored on
-the device's **LED Ring** light entity (floor 20%), and that light is normally
-off, so the value is easy to miss. To dim the animations, turn the LED Ring
-light on at the brightness you want, then turn it off again; the value
-persists across reboots. Dimmer than 20% needs a firmware change.
+the device's **LED Ring** light entity, with a floor of 20% in the stock
+firmware. With the firmware add-on (step 4) each device has a **Wake LED
+brightness** slider (20 to 100%) on the dashboard that sets it without
+switching the ring on. Without the add-on: turn the LED Ring light on at the
+brightness you want, then off again; the value persists across reboots.
 
 ### 3. Pipelines and per-device voice
 
@@ -140,8 +141,8 @@ installer.
 
 ## Shout-to-talk
 
-Each device gains three entities: **Shout to talk** (switch), **Intercom shout
-threshold** (dB slider; 0 is the loudest the microphone can measure, so values
+Each device gains **Shout to talk** (switch), **Wake LED brightness** (see
+"LED ring brightness"), **Intercom shout threshold** (dB slider; 0 is the loudest the microphone can measure, so values
 are negative) and **Intercom sound level** (loudest peak of the last second).
 A peak above the threshold while the device is idle (not muted, listening,
 announcing or playing, no timer ringing) starts listening at once, with no
@@ -175,8 +176,10 @@ device. Dropped ones still appear in the transcript log, marked as echoes.
 ## Sending from a phone or browser
 
 The top of the Intercom dashboard has a **Message** box and a **Send** button:
-type, tap Send, and the text is announced on every speaker, pushed to
-everyone else's phones, and logged as "typed". The sender is the Home
+type, then press Return or tap Send, and the text is announced on every speaker, pushed to
+everyone else's phones, and logged as "typed". The message sends when the box
+commits (Return, or the keyboard closing), because on a phone the first tap on
+Send only closes the keyboard; so tapping outside the box also sends it. The sender is the Home
 Assistant person who pressed Send, so their own phones get no push. Assist in
 the Companion app works too (typed, or spoken if the app's Assist uses a
 pipeline with free-text speech-to-text), because the catch-all trigger

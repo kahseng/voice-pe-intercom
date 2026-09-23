@@ -18,8 +18,8 @@
 #   - margin:  "Intercom adaptive margin", how far above the conversation a
 #     shout must be (default 4 dB)
 #
-# Entities per device: Shout to talk (switch), Intercom shout threshold and
-# Intercom adaptive margin (sliders), Intercom sound level, Intercom ambient
+# Entities per device: Shout to talk (switch), Intercom shout threshold,
+# Intercom adaptive margin and Wake LED brightness (sliders), Intercom sound level, Intercom ambient
 # level and Intercom effective threshold (sensors).
 # =============================================================================
 
@@ -59,6 +59,30 @@ switch:
     restore_mode: RESTORE_DEFAULT_ON
 
 number:
+  # Brightness of the ring's listening / thinking / replying animations. The
+  # stock firmware takes it from the LED Ring light's stored brightness, with a
+  # floor of 20%; light.control changes that value without switching the ring
+  # on. Adjusting the LED Ring light itself (as a night light) changes it too.
+  - platform: template
+    name: "Wake LED brightness"
+    id: intercom_wake_led_brightness
+    icon: mdi:led-on
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 20
+    min_value: 20
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    # set_action, not on_value: it runs only when the slider is moved, never
+    # while restoring at boot (the LED Ring light restores its own brightness).
+    # An on_value here fired during setup and crashed the device into a boot loop.
+    set_action:
+      - light.control:
+          id: led_ring
+          brightness: !lambda return x / 100.0f;
   - platform: template
     name: "Intercom shout threshold"
     id: intercom_shout_threshold

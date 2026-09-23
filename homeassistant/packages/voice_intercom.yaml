@@ -186,6 +186,13 @@ script:
       to the phones of everyone except the person who pressed Send, and clear
       the box. Wired to the Send button on the Intercom dashboard.
     mode: queued
+    fields:
+      user_id:
+        name: User id
+        description: Who typed the message. Defaults to the user who ran the script.
+        required: false
+        selector:
+          text:
     sequence:
       # On a phone, tapping Send also commits the text box; give that a moment.
       - wait_template: "{{ states('input_text.intercom_compose') | trim | length > 0 }}"
@@ -194,7 +201,7 @@ script:
       - variables:
           text: "{{ states('input_text.intercom_compose') | trim }}"
           person: >-
-            {{ states.person | selectattr('attributes.user_id', 'eq', context.user_id)
+            {{ states.person | selectattr('attributes.user_id', 'eq', user_id | default(context.user_id, true))
                | map(attribute='entity_id') | first | default('') }}
           sender: "{{ state_attr(person, 'friendly_name') if person else 'Dashboard' }}"
           own_phones: >-
@@ -273,6 +280,25 @@ automation:
             source: "{{ trigger.satellite_id or '' }}"
             sender: "{{ source_name }}"
             exclude_phone: "{{ from_phone }}"
+
+  - id: voice_intercom_send_typed_on_commit
+    alias: "Intercom: send typed message when the box is committed"
+    description: >-
+      The Message box commits when you press Return or the keyboard closes,
+      which is what the first tap on Send does on a phone. Sending on commit
+      makes that first tap work. The Send script is queued and clears the box,
+      so a Send tap arriving as well does not send twice.
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: input_text.intercom_compose
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.state | trim not in ['', 'unknown', 'unavailable'] }}"
+    actions:
+      - action: script.intercom_send_typed
+        data:
+          user_id: "{{ trigger.to_state.context.user_id }}"
 
   - id: voice_intercom_phone_actions
     alias: "Intercom: phone notification actions"

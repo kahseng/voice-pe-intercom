@@ -52,6 +52,7 @@ def device_section(d: dict) -> dict:
             {"entity": f"sensor.{pre}_intercom_effective_threshold", "name": "Effective threshold"},
             {"entity": f"sensor.{pre}_intercom_ambient_level", "name": "Ambient speech level"},
             {"entity": f"sensor.{pre}_intercom_sound_level", "name": "Sound level now"},
+            {"entity": f"number.{pre}_wake_led_brightness", "name": "Wake LED brightness"},
             {"entity": f"select.home_assistant_voice_{sfx}_wake_word", "name": "Wake word"},
             {"entity": f"switch.home_assistant_voice_{sfx}_mute", "name": "Microphone mute"}]}]}
 
@@ -63,7 +64,7 @@ def render_dashboard(devices: list[dict]) -> dict:
         {"type": "heading", "heading": "Send a message", "icon": "mdi:send"},
         {"type": "entities", "entities": [
             {"entity": "input_text.intercom_compose", "name": "Message"},
-            {"type": "button", "name": "Announce on every speaker", "icon": "mdi:bullhorn",
+            {"type": "button", "name": "Announce on every speaker (or press Return)", "icon": "mdi:bullhorn",
              "action_name": "Send",
              "tap_action": {"action": "perform-action", "perform_action": "script.intercom_send_typed"}}]}]}]
     sections += [device_section(d) for d in devices]
@@ -76,7 +77,8 @@ def render_dashboard(devices: list[dict]) -> dict:
             {"entity": "input_text.intercom_phones", "name": "Phones"},
             {"entity": "timer.intercom_shout_mute", "name": "Shouts muted from a phone"},
             {"entity": "automation.intercom_broadcast_by_voice", "name": "Intercom automation"},
-            {"entity": "automation.intercom_phone_notification_actions", "name": "Phone buttons automation"}]}]})
+            {"entity": "automation.intercom_phone_notification_actions", "name": "Phone buttons automation"},
+            {"entity": "automation.intercom_send_typed_message_when_the_box_is_committed", "name": "Send on Return"}]}]})
     sections.append({"type": "grid", "column_span": n, "cards": [
         {"type": "heading", "heading": "Sound level, last 30 minutes (dB, 0 = loudest)", "icon": "mdi:waveform"},
         {"type": "history-graph", "hours_to_show": 0.5, "refresh_interval": 5, "grid_options": {"columns": "full"},
