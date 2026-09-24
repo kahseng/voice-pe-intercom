@@ -75,7 +75,9 @@ That creates the helpers, the script "Intercom: broadcast", the automations
 the phone list, records who the administrators are, and creates two
 dashboards:
 
-- **Intercom**, for everyone: the Send box and the last message.
+- **Intercom**, for everyone: the Send box and the last 10 messages with
+  time and sender (kept in `input_text.intercom_history_1` to `_10`, newest
+  first, across restarts).
 - **Intercom settings**, for administrators only (hidden from other users'
   sidebars): each device's controls, push settings, the sound-level graph,
   the transcript log and tuning notes.

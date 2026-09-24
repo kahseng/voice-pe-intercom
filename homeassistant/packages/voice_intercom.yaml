@@ -54,6 +54,49 @@ input_text:
     name: Intercom message
     icon: mdi:message-draw
     max: 255
+  # The last 10 messages sent, newest in intercom_history_1, each stored as
+  # "<ISO time>|<from>|<message>" (message cut to fit 255 characters). Shown
+  # on the Intercom dashboard. Kept across restarts.
+  intercom_history_1:
+    name: Intercom history 1
+    icon: mdi:history
+    max: 255
+  intercom_history_2:
+    name: Intercom history 2
+    icon: mdi:history
+    max: 255
+  intercom_history_3:
+    name: Intercom history 3
+    icon: mdi:history
+    max: 255
+  intercom_history_4:
+    name: Intercom history 4
+    icon: mdi:history
+    max: 255
+  intercom_history_5:
+    name: Intercom history 5
+    icon: mdi:history
+    max: 255
+  intercom_history_6:
+    name: Intercom history 6
+    icon: mdi:history
+    max: 255
+  intercom_history_7:
+    name: Intercom history 7
+    icon: mdi:history
+    max: 255
+  intercom_history_8:
+    name: Intercom history 8
+    icon: mdi:history
+    max: 255
+  intercom_history_9:
+    name: Intercom history 9
+    icon: mdi:history
+    max: 255
+  intercom_history_10:
+    name: Intercom history 10
+    icon: mdi:history
+    max: 255
   intercom_phones:
     # "all" (the default): push to every Companion app device, including ones
     # added later. Or a comma-separated list of notify services, e.g.
@@ -175,6 +218,24 @@ script:
           entity_id: input_text.intercom_last_from
         data:
           value: "{{ from_name[:255] }}"
+      # Shift the 10-message history down by one and put this one on top.
+      - variables:
+          history: >-
+            {% set entry = now().isoformat(timespec='seconds') ~ '|' ~ (from_name | replace('|', '/'))
+                           ~ '|' ~ (message | trim | replace('|', '/')) %}
+            {% set older = namespace(items=[]) %}
+            {% for i in range(1, 10) %}
+              {% set older.items = older.items + [states('input_text.intercom_history_' ~ i)] %}
+            {% endfor %}
+            {{ ([entry[:255]] + older.items)[:10] }}
+      - repeat:
+          for_each: "{{ history }}"
+          sequence:
+            - action: input_text.set_value
+              target:
+                entity_id: "input_text.intercom_history_{{ repeat.index }}"
+              data:
+                value: "{{ repeat.item if repeat.item not in ['unknown', 'unavailable'] else '' }}"
       # Push first: it is quick, while announce waits for playback to finish.
       - if:
           - condition: state

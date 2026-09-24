@@ -55,17 +55,17 @@ TUNING_NOTES = (
     "to the ambient speech level plus the *adaptive margin*, and lets it decay 3 dB per minute once it is quiet."
 )
 
-LAST_MESSAGE = (
-    "{% set msg = states('input_text.intercom_last_message') %}"
-    "{% if msg not in ['', 'unknown', 'unavailable'] %}"
-    "{% set who = states('input_text.intercom_last_from') %}"
-    "{% set sat = states('input_text.intercom_last_sender') %}"
-    "{% if who in ['', 'unknown', 'unavailable'] %}"
-    "{% set who = (area_name(sat) or state_attr(sat, 'friendly_name')) if sat.startswith('assist_satellite.') else '' %}"
-    "{% endif %}"
-    "**{{ who or 'Intercom' }}**, "
-    "{{ relative_time(states.input_text.intercom_last_message.last_changed) }} ago\n\n> {{ msg }}"
-    "{% else %}No messages yet.{% endif %}"
+RECENT_MESSAGES = (
+    "{% set ns = namespace(lines=[]) %}"
+    "{% for i in range(1, 11) %}"
+    "{% set e = states('input_text.intercom_history_' ~ i) %}"
+    "{% if e.count('|') >= 2 %}"
+    "{% set p = e.split('|', 2) %}{% set t = as_datetime(p[0]) %}"
+    "{% set when = (t | as_local).strftime('%H:%M') if (t | as_local).date() == now().date() "
+    "else (t | as_local).strftime('%a %H:%M') %}"
+    "{% set ns.lines = ns.lines + ['**' ~ when ~ '** \u00b7 ' ~ p[1] ~ '<br>' ~ p[2]] %}"
+    "{% endif %}{% endfor %}"
+    "{{ ns.lines | join('\n\n') if ns.lines else 'No messages yet.' }}"
 )
 
 SEND_SECTION = {"type": "grid", "column_span": 2, "cards": [
@@ -75,7 +75,7 @@ SEND_SECTION = {"type": "grid", "column_span": 2, "cards": [
         {"type": "button", "name": "Announce on every speaker (or press Return)", "icon": "mdi:bullhorn",
          "action_name": "Send",
          "tap_action": {"action": "perform-action", "perform_action": "script.intercom_send_typed"}}]},
-    {"type": "markdown", "content": LAST_MESSAGE}]}
+    {"type": "markdown", "title": "Recent messages", "content": RECENT_MESSAGES}]}
 
 
 def device_section(d: dict) -> dict:
